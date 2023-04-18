@@ -33,6 +33,38 @@ type Coordinator struct {
 
 // Your code here -- RPC handlers for the worker to call.
 
+// Handle GetTask RPC from worker
+func (c *Coordinator) HandleGetTask(args *GetTaskArgs, reply *GetTaskReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	reply.NReduceTasks = c.nReduceTasks
+	reply.NMapTasks = c.nMapTasks
+
+	//TODO: issue all map and reduce tasks
+
+	// if all map and reduce tasks are done, send the querying worker a Done task, and set isDone to true
+	reply.TaskType = Done
+	c.isDone = true
+
+	return nil
+}
+
+func (c *Coordinator) HandleFinishedTask(args *FinishedTaskArgs, reply *FinishedTaskReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch args.TaskType {
+	case Map:
+		c.mapTasksFinished[args.TaskNum] = true
+	case Reduce:
+		c.reduceTasksFinished[args.TaskNum] = true
+	default:
+		log.Fatalf("Bad finished task? %d", args.TaskType)
+	}
+	return nil
+}
+
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
