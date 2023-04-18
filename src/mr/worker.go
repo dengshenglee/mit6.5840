@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"log"
 	"net/rpc"
+	"os"
 )
 
 // Map functions return a slice of KeyValue.
@@ -21,14 +22,70 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
+/*
+* finalizeReduceFile atomically renames temporary reduce file to a completed reduce task file
+ */
+func finalizeReduceFile(tmpFile string, taskN int) {
+	finalFile := fmt.Sprintf("mr-out-%d", taskN)
+	os.Rename(tmpFile, finalFile)
+}
+
+/*
+* get name of the intermediate file for a map and reduce task number
+ */
+func getIntermediateFile(mapTaskN int, redTaskN int) string {
+	return fmt.Sprint("mr-%d-%d", mapTaskN, redTaskN)
+}
+
+/*
+* finalizeIntermediateFile atomically renames temporary intermediate file to a completed intermediate file
+ */
+func finalizeIntermediateFile(tmpFile string, mapTaskN int, redTaskN int) {
+	finalFile := getIntermediateFile(mapTaskN, redTaskN)
+	os.Rename(tmpFile, finalFile)
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
 
+	for {
+		args := GetTaskArgs{}
+		reply := GetTaskReply{}
+		// call the coordinator to get a task
+		call("Coordinator.HandleGetTask", &args, &reply)
+
+		switch reply.TaskType {
+		case Map:
+			// performMap(reply.MapFile, reply.TaskNum, reply.NReduceTasks, mapf)
+		case Reduce:
+			// performReduce(reply.TaskNum, reply.NMapTasks, reducef)
+		case Done:
+			os.Exit(0)
+		default:
+			fmt.Errorf("Bad task type? %d", reply.TaskType)
+		}
+
+		//tell the coordinator that we are done
+		finargs := FinishedTaskArgs{
+			TaskType: reply.TaskType,
+			TaskNum:  reply.TaskNum,
+		}
+		finreply := FinishedTaskReply{}
+		call("Coordinator.HandleFinishedTask", &finargs, &finreply)
+	}
 	// uncomment to send the Example RPC to the coordinator.
-	CallExample()
+	// CallExample()
 
 }
 
