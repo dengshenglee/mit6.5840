@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 )
 
 // Map functions return a slice of KeyValue.
@@ -106,6 +107,64 @@ func performMap(filename string, taskNum int, nReduceTasks int, mapf func(string
 	}
 }
 
+/*
+* implementation of Reduce task
+ */
+func performReduce(taskNum int, NMapTasks int, reducef func(string, []string) string) {
+	//get all intermediate file corresponding to this reduce task, and collect the corresponding key-value pairs
+	kva := []KeyValue{}
+	for m := 0; m < NMapTasks; m++ {
+		iFilename := getIntermediateFile(m, taskNum)
+		file, err := os.Open(iFilename)
+		if err != nil {
+			log.Fatalf("cannot open %v", iFilename)
+		}
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				log.Fatalf("cannot decode %v", iFilename)
+				break
+			}
+			kva = append(kva, kv)
+		}
+	}
+
+	// sort the keys
+	sort.Sort(ByKey(kva))
+
+	// get temporary reduce file to write Values
+	tmpFile, err := ioutil.TempFile("", "")
+	if err != nil {
+		log.Fatalf("cannot open TempFile")
+	}
+	tmpFilename := tmpFile.Name()
+
+	// apply reduce function once to all values of the same key
+	key_begin := 0
+	for key_begin < len(kva) {
+		key_end := key_begin + 1
+		// find all the values with the same keys -- they are grouped
+		// together for the keys are sorted
+		for key_end < len(kva) && kva[key_end].Key == kva[key_begin].Key {
+			key_end++
+		}
+		values := []string{}
+		for k := key_begin; k < key_end; k++ {
+			values = append(values, kva[k].Value)
+		}
+		output := reducef(kva[key_begin].Key, values)
+
+		//Write output to reduce task tmp file
+		fmt.Fprintf(tmpFile, "%v %v\n", kva[key_begin].Key, output)
+
+		// go to the next key
+		key_begin = key_end
+	}
+
+	finalizeReduceFile(tmpFilename, taskNum)
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
@@ -120,9 +179,9 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		switch reply.TaskType {
 		case Map:
-			// performMap(reply.MapFile, reply.TaskNum, reply.NReduceTasks, mapf)
+			performMap(reply.MapFile, reply.TaskNum, reply.NReduceTasks, mapf)
 		case Reduce:
-			// performReduce(reply.TaskNum, reply.NMapTasks, reducef)
+			performReduce(reply.TaskNum, reply.NMapTasks, reducef)
 		case Done:
 			os.Exit(0)
 		default:
