@@ -1,8 +1,10 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io/ioutil"
 	"log"
 	"net/rpc"
 	"os"
@@ -51,6 +53,57 @@ func getIntermediateFile(mapTaskN int, redTaskN int) string {
 func finalizeIntermediateFile(tmpFile string, mapTaskN int, redTaskN int) {
 	finalFile := getIntermediateFile(mapTaskN, redTaskN)
 	os.Rename(tmpFile, finalFile)
+}
+
+/*
+* implementation of map task
+ */
+func performMap(filename string, taskNum int, nReduceTasks int, mapf func(string, string) []KeyValue) {
+	//read contents to map
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+
+	file.Close()
+	// map the contents
+	kva := mapf(filename, string(content))
+
+	// create temporary files and encoders for each file
+	tmpFiles := []*os.File{}
+	tmpFilenames := []string{}
+	encoders := []*json.Encoder{}
+	for r := 0; r < nReduceTasks; r++ {
+		tmpFile, err := ioutil.TempFile("", "")
+		if err != nil {
+			log.Fatalf("cannot open tmpfile\n")
+		}
+		tmpFiles = append(tmpFiles, tmpFile)
+		tmpFilename := tmpFile.Name()
+		tmpFilenames = append(tmpFilenames, tmpFilename)
+		enc := json.NewEncoder(tmpFile)
+		encoders = append(encoders, enc)
+	}
+
+	// write output keys to appropriate (temporary) intermediate files
+	// using the provided hash function
+	for _, kv := range kva {
+		r := ihash(kv.Key) % nReduceTasks
+		encoders[r].Encode(&kv)
+	}
+	for _, f := range tmpFiles {
+		f.Close()
+	}
+
+	// atomically rename files to final intermediate files
+	for r := 0; r < nReduceTasks; r++ {
+		finalizeIntermediateFile(tmpFilenames[r], taskNum, r)
+	}
 }
 
 // main/mrworker.go calls this function.
