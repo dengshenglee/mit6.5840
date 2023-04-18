@@ -6,11 +6,29 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
+	"time"
 )
 
 type Coordinator struct {
 	// Your definitions here.
 
+	// Protect Coordinator state
+	// from concurrent access
+	mu sync.Mutex
+
+	mapFiles     []string
+	nMapTasks    int
+	nReduceTasks int
+
+	// Keep track of the state of each task when they are assigned to workers
+	mapTasksFinished    []bool
+	mapTasksIssued      []time.Time
+	reduceTasksFinished []bool
+	reduceTasksIssued   []time.Time
+
+	//set to true when all reduce tasks are finished
+	isDone bool
 }
 
 // Your code here -- RPC handlers for the worker to call.
