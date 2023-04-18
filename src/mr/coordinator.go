@@ -41,7 +41,61 @@ func (c *Coordinator) HandleGetTask(args *GetTaskArgs, reply *GetTaskReply) erro
 	reply.NReduceTasks = c.nReduceTasks
 	reply.NMapTasks = c.nMapTasks
 
-	//TODO: issue all map and reduce tasks
+	// Issued map tasks until there are no map tasks left
+	for {
+		mapDone := true
+		for m, done := range c.mapTasksFinished {
+			if !done {
+				// assigned a task if it's either never been issued,
+				// or if it's been too long since it was issued so the worker may have crashed.
+				// Note: if task has never been issued, time is initialized to 0 UTC.
+				if c.mapTasksIssued[m].IsZero() ||
+					time.Since(c.mapTasksIssued[m]).Seconds() > 10 {
+					reply.TaskType = Map
+					reply.TaskNum = m
+					reply.MapFile = c.mapFiles[m]
+					c.mapTasksIssued[m] = time.Now()
+					return nil
+				} else {
+					mapDone = false
+				}
+			}
+		}
+
+		// if all maps are in progress and haven't time out, wait to give another task
+		if !mapDone {
+			//TODO: wait!
+		} else {
+			// we're done with all map tasks
+			break
+		}
+	}
+
+	// All map tasks are done, issued reduce task now!
+	for {
+		redDone := true
+		for r, done := range c.reduceTasksFinished {
+			if !done {
+				// assign a task if it's either never been issued, or if it's been too long
+				if c.reduceTasksIssued[r].IsZero() ||
+					time.Since(c.reduceTasksIssued[r]).Seconds() > 10 {
+					reply.TaskType = Reduce
+					reply.TaskNum = r
+					reply.MapFile = c.mapFiles[r]
+					c.mapTasksIssued[r] = time.Now()
+					return nil
+				} else {
+					redDone = false
+				}
+			}
+		}
+
+		if !redDone {
+			//TODO: wait!
+		} else {
+			break
+		}
+	}
 
 	// if all map and reduce tasks are done, send the querying worker a Done task, and set isDone to true
 	reply.TaskType = Done
