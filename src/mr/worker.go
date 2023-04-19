@@ -45,7 +45,7 @@ func finalizeReduceFile(tmpFile string, taskN int) {
 * get name of the intermediate file for a map and reduce task number
  */
 func getIntermediateFile(mapTaskN int, redTaskN int) string {
-	return fmt.Sprint("mr-%d-%d", mapTaskN, redTaskN)
+	return fmt.Sprintf("mr-%d-%d", mapTaskN, redTaskN)
 }
 
 /*
@@ -63,7 +63,7 @@ func performMap(filename string, taskNum int, nReduceTasks int, mapf func(string
 	//read contents to map
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("cannot open %v", filename)
+		log.Fatalf("cannot open %v in performMap", filename)
 	}
 
 	content, err := ioutil.ReadAll(file)
@@ -117,13 +117,12 @@ func performReduce(taskNum int, NMapTasks int, reducef func(string, []string) st
 		iFilename := getIntermediateFile(m, taskNum)
 		file, err := os.Open(iFilename)
 		if err != nil {
-			log.Fatalf("cannot open %v", iFilename)
+			log.Fatalf("cannot open %v in performReduce", iFilename)
 		}
 		dec := json.NewDecoder(file)
 		for {
 			var kv KeyValue
 			if err := dec.Decode(&kv); err != nil {
-				log.Fatalf("cannot decode %v", iFilename)
 				break
 			}
 			kva = append(kva, kv)
@@ -176,6 +175,8 @@ func Worker(mapf func(string, string) []KeyValue,
 		reply := GetTaskReply{}
 		// call the coordinator to get a task
 		call("Coordinator.HandleGetTask", &args, &reply)
+
+		log.Printf("Got task %d of type %d, with map-file %s", reply.TaskNum, reply.TaskType, reply.MapFile)
 
 		switch reply.TaskType {
 		case Map:
