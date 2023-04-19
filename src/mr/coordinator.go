@@ -17,6 +17,11 @@ type Coordinator struct {
 	// from concurrent access
 	mu sync.Mutex
 
+	// Allow Coordinator to wait to assign reduce tasks until map tasks have finished,
+	// or when all tasks are signed and are running.
+	// The Coordinator is woken up either when a task has finished, or if a timeout has expired.
+	cond *sync.Cond
+
 	mapFiles     []string
 	nMapTasks    int
 	nReduceTasks int
@@ -64,7 +69,7 @@ func (c *Coordinator) HandleGetTask(args *GetTaskArgs, reply *GetTaskReply) erro
 
 		// if all maps are in progress and haven't time out, wait to give another task
 		if !mapDone {
-			//TODO: wait!
+			c.cond.Wait()
 		} else {
 			// we're done with all map tasks
 			break
@@ -81,8 +86,7 @@ func (c *Coordinator) HandleGetTask(args *GetTaskArgs, reply *GetTaskReply) erro
 					time.Since(c.reduceTasksIssued[r]).Seconds() > 10 {
 					reply.TaskType = Reduce
 					reply.TaskNum = r
-					reply.MapFile = c.mapFiles[r]
-					c.mapTasksIssued[r] = time.Now()
+					c.reduceTasksIssued[r] = time.Now()
 					return nil
 				} else {
 					redDone = false
@@ -91,7 +95,7 @@ func (c *Coordinator) HandleGetTask(args *GetTaskArgs, reply *GetTaskReply) erro
 		}
 
 		if !redDone {
-			//TODO: wait!
+			c.cond.Wait()
 		} else {
 			break
 		}
@@ -116,6 +120,10 @@ func (c *Coordinator) HandleFinishedTask(args *FinishedTaskArgs, reply *Finished
 	default:
 		log.Fatalf("Bad finished task? %d", args.TaskType)
 	}
+
+	//wake up the GetTask handler loop: a task has finished, so we might be able to assign another one
+	c.cond.Broadcast()
+
 	return nil
 }
 
@@ -144,11 +152,9 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := true
-
 	// Your code here.
 
-	return ret
+	return c.isDone
 }
 
 // create a Coordinator.
@@ -158,6 +164,27 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
 	// Your code here.
+
+	c.cond = sync.NewCond(&c.mu)
+	c.nMapTasks = len(files)
+	c.mapTasksFinished = make([]bool, len(files))
+	c.mapTasksIssued = make([]time.Time, len(files))
+	c.mapFiles = files
+
+	c.nReduceTasks = nReduce
+	c.reduceTasksFinished = make([]bool, nReduce)
+	c.reduceTasksIssued = make([]time.Time, nReduce)
+
+	//wake up the GetTask handler thread every once in awhile to check if some task hasn't
+	//finished, so we can know to reissue it
+	go func() {
+		for {
+			c.mu.Lock()
+			c.cond.Broadcast()
+			c.mu.Unlock()
+			time.Sleep(time.Second)
+		}
+	}()
 
 	c.server()
 	return &c
